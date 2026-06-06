@@ -1,0 +1,2 @@
+Flask>=2.2
+adafruit-circuitpython-mcp4725>=2.0

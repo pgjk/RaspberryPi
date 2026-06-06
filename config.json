@@ -1,0 +1,41 @@
+{
+  "sensors": {
+    "house": "28-000000000000",
+    "outside": "28-000000000001",
+    "heat_exchanger": "28-000000000002",
+    "heating_circuit": "28-000000000003"
+  },
+  "dac": {
+    "address": 96,
+    "voltage_span": 10.0
+  },
+  "pid": {
+    "kp": 2.0,
+    "ki": 0.5,
+    "kd": 1.0,
+    "setpoint": 40.0,
+    "output_min": 0.0,
+    "output_max": 10.0
+  },
+  "loop_interval_seconds": 5,
+  "web_port": 5000,
+  "history": {
+    "max_points": 288
+  },
+  "alerts": {
+    "house": { "min": 15.0, "max": 25.0 },
+    "outside": { "min": -20.0, "max": 40.0 },
+    "heat_exchanger": { "min": 10.0, "max": 90.0 },
+    "heating_circuit": { "min": 15.0, "max": 70.0 }
+  },
+  "email_alerts": {
+    "enabled": false,
+    "smtp_host": "smtp.example.com",
+    "smtp_port": 587,
+    "smtp_user": "user@example.com",
+    "smtp_password": "password",
+    "use_tls": true,
+    "from_address": "raspi@example.com",
+    "to_address": "owner@example.com"
+  }
+}
