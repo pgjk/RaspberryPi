@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/OneDrive/Dokument/Hus/RaspberryPi
-ExecStart=/usr/bin/python3 /home/pi/OneDrive/Dokument/Hus/RaspberryPi/app.py
+User=admin
+WorkingDirectory=/home/admin/RaspberryPi
+ExecStart=/home/admin/RaspberryPi/venv/bin/python /home/admin/RaspberryPi/app.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
