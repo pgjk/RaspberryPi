@@ -1,9 +1,9 @@
 {
   "sensors": {
-    "house": "28-000000000000",
-    "outside": "28-000000000001",
-    "heat_exchanger": "28-000000000002",
-    "heating_circuit": "28-000000000003"
+    "house": "28-012113320b71",
+    "outside": "28-01211357522f",
+    "heat_exchanger": "28-01211360cf27",
+    "heating_circuit": "28-012112fe220c"
   },
   "dac": {
     "address": 96,
@@ -16,6 +16,13 @@
     "setpoint": 40.0,
     "output_min": 0.0,
     "output_max": 10.0
+  },
+    "weather_compensation": {
+    "enabled": true,
+    "gain": 0.15,
+    "outside_baseline": 10.0,
+    "min_offset": 0.0,
+    "max_offset": 6.0
   },
   "loop_interval_seconds": 5,
   "web_port": 5000,

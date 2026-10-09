@@ -42,6 +42,7 @@ state = {
     "current_temps": {key: None for key in config["sensors"].keys()},
     "setpoint": config["pid"]["setpoint"],
     "valve_voltage": 0.0,
+    "effective_setpoint": config["pid"]["setpoint"],
     "last_updated": None,
     "alert": None,
 }
@@ -122,10 +123,26 @@ def control_loop() -> None:
 
         house_temp = temperatures.get("house")
         if house_temp is not None:
-            controller.setpoint = state["setpoint"]
+            # Apply optional weather compensation (adjust setpoint based on outside temp)
+            base_setpoint = state["setpoint"]
+            adjusted_setpoint = base_setpoint
+            wc = config.get("weather_compensation", {})
+            if wc.get("enabled"):
+                outside_temp = temperatures.get("outside")
+                if outside_temp is not None:
+                    gain = float(wc.get("gain", 0.0))
+                    baseline = float(wc.get("outside_baseline", 10.0))
+                    raw_offset = gain * max(0.0, baseline - outside_temp)
+                    min_off = float(wc.get("min_offset", 0.0))
+                    max_off = float(wc.get("max_offset", 10.0))
+                    offset = min(max(raw_offset, min_off), max_off)
+                    adjusted_setpoint = base_setpoint + offset
+
+            controller.setpoint = adjusted_setpoint
             output_voltage = controller.update(house_temp)
             valve.set_voltage(output_voltage)
             state["valve_voltage"] = output_voltage
+            state["effective_setpoint"] = adjusted_setpoint
         else:
             logging.warning("House temperature is unavailable; valve output is held at current value.")
 
@@ -188,6 +205,10 @@ def index():
             <div class="card">
                 <p class="small">Target temperature</p>
                 <p class="value" id="setpoint">-- °C</p>
+            </div>
+            <div class="card">
+                <p class="small">Effective setpoint</p>
+                <p class="value" id="effectiveSetpoint">-- °C</p>
             </div>
             <div class="card">
                 <p class="small">Valve output</p>
@@ -349,7 +370,12 @@ def api_email_test():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-if __name__ == "__main__":
+def main() -> None:
     worker = threading.Thread(target=control_loop, daemon=True)
     worker.start()
     app.run(host="0.0.0.0", port=config["web_port"], debug=False)
+
+
+if __name__ == "__main__":
+    main()
+
