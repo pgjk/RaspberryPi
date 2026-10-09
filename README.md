@@ -15,21 +15,31 @@ This project reads multiple 1-Wire temperature sensors and controls an ESBE-styl
 
 1. Enable 1-Wire on the Raspberry Pi with `dtoverlay=w1-gpio,gpiopin=4` in `/boot/config.txt`.
 2. Enable I2C in `raspi-config`.
-3. Install dependencies in a Python environment:
+3. Install SWIG and the `lgpio` development library, which are needed to build the Raspberry Pi GPIO dependency:
 
 ```bash
-python -m pip install -r requirements.txt
+sudo apt update
+sudo apt install -y swig liblgpio-dev
 ```
 
-4. Adjust `config.json` with your sensor IDs and email settings.
-
-5. Start the app:
+4. Create a virtual environment and install the dependencies:
 
 ```bash
-python app.py
+python3 -m venv venv
+./venv/bin/python -m pip install -r requirements.txt
 ```
 
-6. Open the dashboard in your browser:
+The first command creates the `venv` directory; it will not exist until you run it. Run the dependency-install command separately.
+
+5. Adjust `config.json` with your sensor IDs and email settings.
+
+6. Start the app:
+
+```bash
+./venv/bin/python app.py
+```
+
+7. Open the dashboard in your browser:
 
 ```
 http://<raspberry-pi-ip>:5000

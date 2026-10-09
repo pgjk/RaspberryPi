@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=admin
-WorkingDirectory=/home/admin/RaspberryPi
-ExecStart=/home/admin/RaspberryPi/venv/bin/python /home/admin/RaspberryPi/app.py
+WorkingDirectory=/home/admin/househeating/RaspberryPi
+ExecStart=/home/admin/househeating/RaspberryPi/venv/bin/python /home/admin/househeating/RaspberryPi/app.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
