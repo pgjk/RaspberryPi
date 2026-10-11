@@ -10,9 +10,13 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-from dac_output import MCP4725Valve
+# from dac_output import MCP4725Valve
 from pid_controller import PIDController
 from temperature import TemperatureMonitor
+
+# from time import sleep
+from gpiozero import PWMOutputDevice
+pwm = PWMOutputDevice(18, frequency=1000, initial_value=0)
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
@@ -31,7 +35,7 @@ controller = PIDController(
     output_min=config["pid"]["output_min"],
     output_max=config["pid"]["output_max"],
 )
-valve = MCP4725Valve(address=config["dac"]["address"], voltage_span=config["dac"]["voltage_span"])
+# valve = MCP4725Valve(address=config["dac"]["address"], voltage_span=config["dac"]["voltage_span"])
 
 history = {
     key: deque(maxlen=config["history"]["max_points"]) for key in config["sensors"].keys()
@@ -114,41 +118,45 @@ def add_history(temperatures: dict, valve_voltage: float) -> None:
 
 
 def control_loop() -> None:
-    while True:
-        temperatures = monitor.read_all()
-        state["current_temps"] = temperatures
-        state["last_updated"] = datetime.utcnow().isoformat()
+    try:
+        while True:
+            temperatures = monitor.read_all()
+            state["current_temps"] = temperatures
+            state["last_updated"] = datetime.utcnow().isoformat()
 
-        check_alerts(temperatures)
+            check_alerts(temperatures)
 
-        house_temp = temperatures.get("house")
-        if house_temp is not None:
-            # Apply optional weather compensation (adjust setpoint based on outside temp)
-            base_setpoint = state["setpoint"]
-            adjusted_setpoint = base_setpoint
-            wc = config.get("weather_compensation", {})
-            if wc.get("enabled"):
-                outside_temp = temperatures.get("outside")
-                if outside_temp is not None:
-                    gain = float(wc.get("gain", 0.0))
-                    baseline = float(wc.get("outside_baseline", 10.0))
-                    raw_offset = gain * max(0.0, baseline - outside_temp)
-                    min_off = float(wc.get("min_offset", 0.0))
-                    max_off = float(wc.get("max_offset", 10.0))
-                    offset = min(max(raw_offset, min_off), max_off)
-                    adjusted_setpoint = base_setpoint + offset
+            house_temp = temperatures.get("house")
+            if house_temp is not None:
+                # Apply optional weather compensation (adjust setpoint based on outside temp)
+                base_setpoint = state["setpoint"]
+                adjusted_setpoint = base_setpoint
+                wc = config.get("weather_compensation", {})
+                if wc.get("enabled"):
+                    outside_temp = temperatures.get("outside")
+                    if outside_temp is not None:
+                        gain = float(wc.get("gain", 0.0))
+                        baseline = float(wc.get("outside_baseline", 10.0))
+                        raw_offset = gain * max(0.0, baseline - outside_temp)
+                        min_off = float(wc.get("min_offset", 0.0))
+                        max_off = float(wc.get("max_offset", 10.0))
+                        offset = min(max(raw_offset, min_off), max_off)
+                        adjusted_setpoint = base_setpoint + offset
 
-            controller.setpoint = adjusted_setpoint
-            output_voltage = controller.update(house_temp)
-            valve.set_voltage(output_voltage)
-            state["valve_voltage"] = output_voltage
-            state["effective_setpoint"] = adjusted_setpoint
-        else:
-            logging.warning("House temperature is unavailable; valve output is held at current value.")
-
-        add_history(temperatures, state["valve_voltage"])
-        time.sleep(config["loop_interval_seconds"])
-
+                controller.setpoint = adjusted_setpoint
+                output_voltage = controller.update(house_temp)
+                pwm.value = output_voltage / config["dac"]["voltage_span"]  # Scale to 0-1 for PWM
+                #valve.set_voltage(output_voltage)
+                state["valve_voltage"] = output_voltage
+                state["effective_setpoint"] = adjusted_setpoint
+            else:
+                logging.warning("House temperature is unavailable; valve output is held at current value.")
+        
+            add_history(temperatures, state["valve_voltage"])
+            time.sleep(config["loop_interval_seconds"])
+    finally:
+        pwm.off()
+        pwm.close()
 
 @app.route("/")
 def index():

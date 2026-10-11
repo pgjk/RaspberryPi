@@ -1,6 +1,7 @@
 # Raspberry Pi Heating Control Project
 
-This project reads multiple 1-Wire temperature sensors and controls an ESBE-style 0-10V shunt valve using an MCP4725 DAC.
+This project reads multiple 1-Wire temperature sensors and controls an 24V ESBE ARA639 (12520100) 0-10V shunt valve.
+Using BCM GPIO18 pin 12 (3,3 V) on the raspberry pi 4.
 
 ## What is included
 
