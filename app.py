@@ -186,7 +186,7 @@ def index():
         <div class="header">
             <div>
                 <h1>Heating Control Dashboard</h1>
-                <p class="small">House temperature, outside temperature, heat exchanger, heating circuit, PID control and email alerts.</p>
+                <p class="small">House temperature, outside temperature, accumulator tank, heating circuit, PID control and email alerts.</p>
             </div>
         </div>
 
@@ -200,8 +200,8 @@ def index():
                 <p class="value" id="outsideTemp">-- °C</p>
             </div>
             <div class="card">
-                <p class="small">Heat exchanger temperature</p>
-                <p class="value" id="heatExchangerTemp">-- °C</p>
+                <p class="small">Accumulator tank temperature</p>
+                <p class="value" id="accumulatorTankTemp">-- °C</p>
             </div>
             <div class="card">
                 <p class="small">Heating circuit temperature</p>
@@ -259,7 +259,7 @@ def index():
             datasets: [
                 { label: 'House', borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.1)', data: [], tension: 0.3 },
                 { label: 'Outside', borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', data: [], tension: 0.3 },
-                { label: 'Heat exchanger', borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', data: [], tension: 0.3 },
+                { label: 'Accumulator tank', borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', data: [], tension: 0.3 },
                 { label: 'Heating circuit', borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', data: [], tension: 0.3 },
                 { label: 'Valve voltage', borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.1)', data: [], tension: 0.3, yAxisID: 'B' }
             ]
@@ -283,7 +283,7 @@ def index():
             const data = await response.json();
             document.getElementById('houseTemp').textContent = formatTemp(data.current_temps.house);
             document.getElementById('outsideTemp').textContent = formatTemp(data.current_temps.outside);
-            document.getElementById('heatExchangerTemp').textContent = formatTemp(data.current_temps.heat_exchanger);
+            document.getElementById('accumulatorTankTemp').textContent = formatTemp(data.current_temps.accumulator_tank);
             document.getElementById('heatingCircuitTemp').textContent = formatTemp(data.current_temps.heating_circuit);
             document.getElementById('setpoint').textContent = `${data.setpoint.toFixed(1)} °C`;
             document.getElementById('valveVoltage').textContent = `${data.valve_voltage.toFixed(2)} V`;
@@ -310,7 +310,7 @@ def index():
 
             chartData.datasets[0].data.push(...history.house.map(entry => entry.value));
             chartData.datasets[1].data.push(...history.outside.map(entry => entry.value));
-            chartData.datasets[2].data.push(...history.heat_exchanger.map(entry => entry.value));
+            chartData.datasets[2].data.push(...history.accumulator_tank.map(entry => entry.value));
             chartData.datasets[3].data.push(...history.heating_circuit.map(entry => entry.value));
             chartData.datasets[4].data.push(...history.valve_voltage.map(entry => entry.value));
             historyChart.update();
@@ -386,4 +386,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

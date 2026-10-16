@@ -2,7 +2,7 @@
   "sensors": {
     "house": "28-012113320b71",
     "outside": "28-01211357522f",
-    "heat_exchanger": "28-01211360cf27",
+    "accumulator_tank": "28-01211360cf27",
     "heating_circuit": "28-012112fe220c"
   },
   "dac": {
@@ -32,7 +32,7 @@
   "alerts": {
     "house": { "min": 15.0, "max": 25.0 },
     "outside": { "min": -20.0, "max": 40.0 },
-    "heat_exchanger": { "min": 10.0, "max": 90.0 },
+    "accumulator_tank": { "min": 10.0, "max": 90.0 },
     "heating_circuit": { "min": 15.0, "max": 70.0 }
   },
   "email_alerts": {
