@@ -10,13 +10,9 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-# from dac_output import MCP4725Valve
-from pid_controller import PIDController
+from pid_controller import PIDController, RoomIntegralCorrection
 from temperature import TemperatureMonitor
-
-# from time import sleep
 from gpiozero import PWMOutputDevice
-pwm = PWMOutputDevice(18, frequency=1000, initial_value=0)
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
@@ -26,16 +22,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     config = json.load(f)
 
+room_config = config["room_control"]
+curve_config = config["heating_curve"]
+pid_config = config["heating_circuit_pid"]
+output_config = config["actuator_output"]
+
 monitor = TemperatureMonitor(config["sensors"])
 controller = PIDController(
-    kp=config["pid"]["kp"],
-    ki=config["pid"]["ki"],
-    kd=config["pid"]["kd"],
-    setpoint=config["pid"]["setpoint"],
-    output_min=config["pid"]["output_min"],
-    output_max=config["pid"]["output_max"],
+    kp=pid_config["kp"],
+    ki=pid_config["ki"],
+    kd=pid_config["kd"],
+    setpoint=0.0,
+    output_min=pid_config["output_min"],
+    output_max=pid_config["output_max"],
 )
-# valve = MCP4725Valve(address=config["dac"]["address"], voltage_span=config["dac"]["voltage_span"])
+room_integral = RoomIntegralCorrection(
+    gain_per_hour=room_config["integral_gain_per_hour"],
+    correction_limit=room_config["max_correction"],
+)
+pwm = PWMOutputDevice(
+    output_config["pwm_pin_bcm"],
+    frequency=output_config["pwm_frequency_hz"],
+    initial_value=0,
+)
 
 history = {
     key: deque(maxlen=config["history"]["max_points"]) for key in config["sensors"].keys()
@@ -44,9 +53,11 @@ history["valve_voltage"] = deque(maxlen=config["history"]["max_points"])
 
 state = {
     "current_temps": {key: None for key in config["sensors"].keys()},
-    "setpoint": config["pid"]["setpoint"],
+    "setpoint": room_config["setpoint"],
     "valve_voltage": 0.0,
-    "effective_setpoint": config["pid"]["setpoint"],
+    "base_heating_circuit_target": None,
+    "room_correction": 0.0,
+    "effective_setpoint": None,
     "last_updated": None,
     "alert": None,
 }
@@ -119,39 +130,56 @@ def add_history(temperatures: dict, valve_voltage: float) -> None:
 
 def control_loop() -> None:
     try:
+        last_update = time.monotonic()
         while True:
             temperatures = monitor.read_all()
             state["current_temps"] = temperatures
             state["last_updated"] = datetime.utcnow().isoformat()
+            now = time.monotonic()
+            dt = max(now - last_update, 0.0)
+            last_update = now
 
             check_alerts(temperatures)
 
             house_temp = temperatures.get("house")
-            if house_temp is not None:
-                # Apply optional weather compensation (adjust setpoint based on outside temp)
-                base_setpoint = state["setpoint"]
-                adjusted_setpoint = base_setpoint
-                wc = config.get("weather_compensation", {})
-                if wc.get("enabled"):
-                    outside_temp = temperatures.get("outside")
-                    if outside_temp is not None:
-                        gain = float(wc.get("gain", 0.0))
-                        baseline = float(wc.get("outside_baseline", 10.0))
-                        raw_offset = gain * max(0.0, baseline - outside_temp)
-                        min_off = float(wc.get("min_offset", 0.0))
-                        max_off = float(wc.get("max_offset", 10.0))
-                        offset = min(max(raw_offset, min_off), max_off)
-                        adjusted_setpoint = base_setpoint + offset
+            outside_temp = temperatures.get("outside")
+            circuit_temp = temperatures.get("heating_circuit")
+            if house_temp is not None and outside_temp is not None and circuit_temp is not None:
+                base_target = (
+                    curve_config["slope"] * outside_temp + curve_config["intercept"]
+                )
+                base_target = max(
+                    curve_config["min_target"],
+                    min(curve_config["max_target"], base_target),
+                )
+                circuit_target = room_integral.update(
+                    room_error=state["setpoint"] - house_temp,
+                    dt=dt,
+                    base_target=base_target,
+                    target_min=curve_config["min_target"],
+                    target_max=curve_config["max_target"],
+                )
 
-                controller.setpoint = adjusted_setpoint
-                output_voltage = controller.update(house_temp)
-                pwm.value = output_voltage / config["dac"]["voltage_span"]  # Scale to 0-1 for PWM
-                #valve.set_voltage(output_voltage)
+                controller.setpoint = circuit_target
+                output_voltage = controller.update(circuit_temp)
+                output_voltage = max(
+                    pid_config["output_min"],
+                    min(pid_config["output_max"], output_voltage),
+                )
+                duty_cycle = output_voltage / output_config["voltage_span"]
+                if output_config["inverted"]:
+                    duty_cycle = 1.0 - duty_cycle
+                pwm.value = max(0.0, min(1.0, duty_cycle))
                 state["valve_voltage"] = output_voltage
-                state["effective_setpoint"] = adjusted_setpoint
+                state["base_heating_circuit_target"] = base_target
+                state["room_correction"] = room_integral.correction
+                state["effective_setpoint"] = circuit_target
             else:
-                logging.warning("House temperature is unavailable; valve output is held at current value.")
-        
+                logging.warning(
+                    "A required house, outside, or heating-circuit temperature is "
+                    "unavailable; holding the current actuator command."
+                )
+
             add_history(temperatures, state["valve_voltage"])
             time.sleep(config["loop_interval_seconds"])
     finally:
@@ -211,11 +239,11 @@ def index():
 
         <div class="grid">
             <div class="card">
-                <p class="small">Target temperature</p>
+                <p class="small">Room target temperature</p>
                 <p class="value" id="setpoint">-- °C</p>
             </div>
             <div class="card">
-                <p class="small">Effective setpoint</p>
+                <p class="small">Heating circuit target</p>
                 <p class="value" id="effectiveSetpoint">-- °C</p>
             </div>
             <div class="card">
@@ -233,7 +261,7 @@ def index():
             <div class="grid">
                 <div>
                     <label for="setpointInput">Setpoint (°C)</label>
-                    <input id="setpointInput" type="number" step="0.1" min="0" max="80" />
+                    <input id="setpointInput" type="number" step="0.1" min="5" max="30" />
                 </div>
                 <div style="align-self:end;">
                     <button class="button" onclick="updateSetpoint()">Update setpoint</button>
@@ -286,6 +314,7 @@ def index():
             document.getElementById('accumulatorTankTemp').textContent = formatTemp(data.current_temps.accumulator_tank);
             document.getElementById('heatingCircuitTemp').textContent = formatTemp(data.current_temps.heating_circuit);
             document.getElementById('setpoint').textContent = `${data.setpoint.toFixed(1)} °C`;
+            document.getElementById('effectiveSetpoint').textContent = formatTemp(data.effective_setpoint);
             document.getElementById('valveVoltage').textContent = `${data.valve_voltage.toFixed(2)} V`;
             document.getElementById('setpointInput').value = data.setpoint.toFixed(1);
 
@@ -362,8 +391,15 @@ def api_history():
 def api_setpoint():
     payload = request.get_json(force=True)
     try:
-        state["setpoint"] = float(payload["setpoint"])
+        setpoint = float(payload["setpoint"])
+        if not room_config["min_setpoint"] <= setpoint <= room_config["max_setpoint"]:
+            raise ValueError(
+                f"Setpoint must be between {room_config['min_setpoint']} and "
+                f"{room_config['max_setpoint']} °C."
+            )
+        state["setpoint"] = setpoint
         controller.reset()
+        room_integral.reset()
         return jsonify({"success": True, "setpoint": state["setpoint"]})
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 400

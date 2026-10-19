@@ -5,24 +5,31 @@
     "accumulator_tank": "28-01211360cf27",
     "heating_circuit": "28-012112fe220c"
   },
-  "dac": {
-    "address": 96,
-    "voltage_span": 10.0
+  "room_control": {
+    "setpoint": 20.0,
+    "integral_gain_per_hour": 1.0,
+    "max_correction": 8.0,
+    "min_setpoint": 5.0,
+    "max_setpoint": 30.0
   },
-  "pid": {
-    "kp": 2.0,
-    "ki": 0.5,
-    "kd": 1.0,
-    "setpoint": 40.0,
+  "heating_curve": {
+    "slope": -0.6,
+    "intercept": 26.0,
+    "min_target": 15.0,
+    "max_target": 44.0
+  },
+  "heating_circuit_pid": {
+    "kp": 0.5,
+    "ki": 0.001,
+    "kd": 0.0,
     "output_min": 0.0,
     "output_max": 10.0
   },
-    "weather_compensation": {
-    "enabled": true,
-    "gain": 0.15,
-    "outside_baseline": 10.0,
-    "min_offset": 0.0,
-    "max_offset": 6.0
+  "actuator_output": {
+    "pwm_pin_bcm": 18,
+    "pwm_frequency_hz": 1000,
+    "voltage_span": 10.0,
+    "inverted": false
   },
   "loop_interval_seconds": 5,
   "web_port": 5000,
