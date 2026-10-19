@@ -346,7 +346,11 @@ def index():
         }
 
         function formatTemp(value) {
-            return value === null ? '-- °C' : `${value.toFixed(1)} °C`;
+            if (value === null || value === undefined || value === '') {
+                return '-- °C';
+            }
+            const numericValue = Number(value);
+            return Number.isFinite(numericValue) ? `${numericValue.toFixed(1)} °C` : '-- °C';
         }
 
         async function updateSetpoint() {
