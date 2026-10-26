@@ -1,8 +1,12 @@
 import json
 import logging
+import math
+import os
 import smtplib
+import tempfile
 import threading
 import time
+from copy import deepcopy
 from collections import deque
 from datetime import datetime
 from email.message import EmailMessage
@@ -64,6 +68,7 @@ state = {
 
 history_lock = threading.Lock()
 email_lock = threading.Lock()
+settings_lock = threading.Lock()
 email_alerted = False
 
 app = Flask(__name__)
@@ -128,6 +133,29 @@ def add_history(temperatures: dict, valve_voltage: float) -> None:
         history["valve_voltage"].append({"time": timestamp, "value": valve_voltage})
 
 
+def save_config(updated_config: dict) -> None:
+    temporary_path = None
+    try:
+        file_descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{CONFIG_PATH.name}.",
+            suffix=".tmp",
+            dir=CONFIG_PATH.parent,
+            text=True,
+        )
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as config_file:
+            os.chmod(temporary_path, CONFIG_PATH.stat().st_mode)
+            json.dump(updated_config, config_file, indent=2)
+            config_file.write("\n")
+        os.replace(temporary_path, CONFIG_PATH)
+    except OSError:
+        if temporary_path is not None and os.path.exists(temporary_path):
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                logging.exception("Could not remove temporary config file")
+        raise
+
+
 def control_loop() -> None:
     try:
         last_update = time.monotonic()
@@ -145,35 +173,36 @@ def control_loop() -> None:
             outside_temp = temperatures.get("outside")
             circuit_temp = temperatures.get("heating_circuit")
             if house_temp is not None and outside_temp is not None and circuit_temp is not None:
-                base_target = (
-                    curve_config["slope"] * outside_temp + curve_config["intercept"]
-                )
-                base_target = max(
-                    curve_config["min_target"],
-                    min(curve_config["max_target"], base_target),
-                )
-                circuit_target = room_integral.update(
-                    room_error=state["setpoint"] - house_temp,
-                    dt=dt,
-                    base_target=base_target,
-                    target_min=curve_config["min_target"],
-                    target_max=curve_config["max_target"],
-                )
+                with settings_lock:
+                    base_target = (
+                        curve_config["slope"] * outside_temp + curve_config["intercept"]
+                    )
+                    base_target = max(
+                        curve_config["min_target"],
+                        min(curve_config["max_target"], base_target),
+                    )
+                    circuit_target = room_integral.update(
+                        room_error=state["setpoint"] - house_temp,
+                        dt=dt,
+                        base_target=base_target,
+                        target_min=curve_config["min_target"],
+                        target_max=curve_config["max_target"],
+                    )
 
-                controller.setpoint = circuit_target
-                output_voltage = controller.update(circuit_temp)
-                output_voltage = max(
-                    pid_config["output_min"],
-                    min(pid_config["output_max"], output_voltage),
-                )
-                duty_cycle = output_voltage / output_config["voltage_span"]
-                if output_config["inverted"]:
-                    duty_cycle = 1.0 - duty_cycle
-                pwm.value = max(0.0, min(1.0, duty_cycle))
-                state["valve_voltage"] = output_voltage
-                state["base_heating_circuit_target"] = base_target
-                state["room_correction"] = room_integral.correction
-                state["effective_setpoint"] = circuit_target
+                    controller.setpoint = circuit_target
+                    output_voltage = controller.update(circuit_temp)
+                    output_voltage = max(
+                        pid_config["output_min"],
+                        min(pid_config["output_max"], output_voltage),
+                    )
+                    duty_cycle = output_voltage / output_config["voltage_span"]
+                    if output_config["inverted"]:
+                        duty_cycle = 1.0 - duty_cycle
+                    pwm.value = max(0.0, min(1.0, duty_cycle))
+                    state["valve_voltage"] = output_voltage
+                    state["base_heating_circuit_target"] = base_target
+                    state["room_correction"] = room_integral.correction
+                    state["effective_setpoint"] = circuit_target
             else:
                 logging.warning(
                     "A required house, outside, or heating-circuit temperature is "
@@ -267,6 +296,36 @@ def index():
                     <button class="button" onclick="updateSetpoint()">Update setpoint</button>
                 </div>
             </div>
+            <p id="setpointStatus" class="small" role="status"></p>
+        </div>
+
+        <div class="card">
+            <h2>Control tuning</h2>
+            <p class="small">Changes are saved to config.json and applied immediately.</p>
+            <div class="grid">
+                <div>
+                    <label for="kpInput">Heating-circuit Kp</label>
+                    <input id="kpInput" type="number" step="any" min="0" />
+                </div>
+                <div>
+                    <label for="kiInput">Heating-circuit Ki</label>
+                    <input id="kiInput" type="number" step="any" min="0" />
+                </div>
+                <div>
+                    <label for="kdInput">Heating-circuit Kd</label>
+                    <input id="kdInput" type="number" step="any" min="0" />
+                </div>
+                <div>
+                    <label for="slopeInput">Outdoor curve slope</label>
+                    <input id="slopeInput" type="number" step="any" />
+                </div>
+                <div>
+                    <label for="interceptInput">Outdoor curve intercept (°C)</label>
+                    <input id="interceptInput" type="number" step="any" />
+                </div>
+            </div>
+            <p id="controlSettingsStatus" class="small" role="status"></p>
+            <button class="button" onclick="saveControlSettings()">Save tuning values</button>
         </div>
 
         <div class="card">
@@ -316,7 +375,10 @@ def index():
             document.getElementById('setpoint').textContent = `${data.setpoint.toFixed(1)} °C`;
             document.getElementById('effectiveSetpoint').textContent = formatTemp(data.effective_setpoint);
             document.getElementById('valveVoltage').textContent = `${data.valve_voltage.toFixed(2)} V`;
-            document.getElementById('setpointInput').value = data.setpoint.toFixed(1);
+            const setpointInput = document.getElementById('setpointInput');
+            if (document.activeElement !== setpointInput) {
+                setpointInput.value = data.setpoint.toFixed(1);
+            }
 
             if (data.alert) {
                 document.getElementById('alertCard').style.display = 'block';
@@ -354,13 +416,63 @@ def index():
         }
 
         async function updateSetpoint() {
-            const value = Number(document.getElementById('setpointInput').value);
-            await fetch('/api/setpoint', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ setpoint: value })
-            });
-            updateDashboard();
+            const status = document.getElementById('setpointStatus');
+            const value = document.getElementById('setpointInput').value;
+            try {
+                const response = await fetch('/api/setpoint', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ setpoint: value })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Could not save room setpoint.');
+                }
+                document.getElementById('setpointInput').value = result.setpoint.toFixed(1);
+                status.textContent = 'Room setpoint saved and applied.';
+                await updateDashboard();
+            } catch (error) {
+                status.textContent = error.message;
+            }
+        }
+
+        async function loadControlSettings() {
+            const response = await fetch('/api/control-settings');
+            if (!response.ok) {
+                throw new Error('Could not load control tuning values.');
+            }
+            const settings = await response.json();
+            document.getElementById('kpInput').value = settings.kp;
+            document.getElementById('kiInput').value = settings.ki;
+            document.getElementById('kdInput').value = settings.kd;
+            document.getElementById('slopeInput').value = settings.slope;
+            document.getElementById('interceptInput').value = settings.intercept;
+        }
+
+        async function saveControlSettings() {
+            const status = document.getElementById('controlSettingsStatus');
+            const values = {
+                kp: document.getElementById('kpInput').value,
+                ki: document.getElementById('kiInput').value,
+                kd: document.getElementById('kdInput').value,
+                slope: document.getElementById('slopeInput').value,
+                intercept: document.getElementById('interceptInput').value
+            };
+
+            try {
+                const response = await fetch('/api/control-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(values)
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Could not save control tuning values.');
+                }
+                status.textContent = 'Tuning values saved and applied.';
+            } catch (error) {
+                status.textContent = error.message;
+            }
         }
 
         async function sendTestEmail() {
@@ -375,6 +487,9 @@ def index():
 
         setInterval(refresh, 5000);
         refresh();
+        loadControlSettings().catch(error => {
+            document.getElementById('controlSettingsStatus').textContent = error.message;
+        });
     </script>
 </body>
 </html>"""
@@ -385,6 +500,66 @@ def api_status():
     return jsonify(state)
 
 
+@app.route("/api/control-settings", methods=["GET", "POST"])
+def api_control_settings():
+    if request.method == "GET":
+        with settings_lock:
+            return jsonify(
+                {
+                    "kp": pid_config["kp"],
+                    "ki": pid_config["ki"],
+                    "kd": pid_config["kd"],
+                    "slope": curve_config["slope"],
+                    "intercept": curve_config["intercept"],
+                }
+            )
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "A JSON object is required."}), 400
+
+    try:
+        tuning_keys = ("kp", "ki", "kd", "slope", "intercept")
+        if any(isinstance(payload.get(key), bool) for key in tuning_keys):
+            raise ValueError("Tuning values must be numeric, not booleans.")
+        values = {
+            key: float(payload[key])
+            for key in tuning_keys
+        }
+        if not all(math.isfinite(value) for value in values.values()):
+            raise ValueError("All tuning values must be finite numbers.")
+        if any(values[key] < 0 for key in ("kp", "ki", "kd")):
+            raise ValueError("PID gains must be zero or greater.")
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    with settings_lock:
+        updated_config = deepcopy(config)
+        updated_config["heating_circuit_pid"].update(
+            {key: values[key] for key in ("kp", "ki", "kd")}
+        )
+        updated_config["heating_curve"].update(
+            {key: values[key] for key in ("slope", "intercept")}
+        )
+
+        try:
+            save_config(updated_config)
+        except OSError:
+            logging.exception("Could not save control tuning values to config.json")
+            return jsonify(
+                {"success": False, "error": "Could not save settings to config.json."}
+            ), 500
+
+        pid_config.update(updated_config["heating_circuit_pid"])
+        curve_config.update(updated_config["heating_curve"])
+        controller.kp = values["kp"]
+        controller.ki = values["ki"]
+        controller.kd = values["kd"]
+        controller.reset()
+
+    return jsonify({"success": True, **values})
+
+
 @app.route("/api/history")
 def api_history():
     with history_lock:
@@ -393,20 +568,40 @@ def api_history():
 
 @app.route("/api/setpoint", methods=["POST"])
 def api_setpoint():
-    payload = request.get_json(force=True)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or isinstance(payload.get("setpoint"), bool):
+        return jsonify({"success": False, "error": "A numeric setpoint is required."}), 400
+
     try:
         setpoint = float(payload["setpoint"])
+        if not math.isfinite(setpoint):
+            raise ValueError("Setpoint must be a finite number.")
         if not room_config["min_setpoint"] <= setpoint <= room_config["max_setpoint"]:
             raise ValueError(
                 f"Setpoint must be between {room_config['min_setpoint']} and "
                 f"{room_config['max_setpoint']} °C."
             )
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    with settings_lock:
+        updated_config = deepcopy(config)
+        updated_config["room_control"]["setpoint"] = setpoint
+        try:
+            save_config(updated_config)
+        except OSError:
+            logging.exception("Could not save room setpoint to config.json")
+            return jsonify(
+                {"success": False, "error": "Could not save room setpoint to config.json."}
+            ), 500
+
+        config["room_control"]["setpoint"] = setpoint
+        room_config["setpoint"] = setpoint
         state["setpoint"] = setpoint
         controller.reset()
         room_integral.reset()
-        return jsonify({"success": True, "setpoint": state["setpoint"]})
-    except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+
+    return jsonify({"success": True, "setpoint": setpoint})
 
 
 @app.route("/api/email-test", methods=["POST"])

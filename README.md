@@ -50,3 +50,6 @@ http://<raspberry-pi-ip>:5000
 - The configured room setpoint defaults to 20°C. Tune the room integral gain and heating-circuit PID gains carefully, initially observing operation continuously. The 44°C heating-circuit target maximum is a configured control limit, not a substitute for any lower limit required by the heating emitters or installation.
 - Email alerts require SMTP credentials configured in `config.json`.
 - If a required room, outdoor, or heating-circuit sensor reading is unavailable, the control loop holds the current PWM command and logs a warning.
+- Use the dashboard's **Control tuning** section to update heating-circuit `kp`, `ki`, `kd`, and outdoor-curve `slope` and `intercept`. Values are applied immediately, the PID state is reset, and the settings are saved to `config.json` for the next restart. PID gains must be non-negative; all values must be finite.
+- The dashboard's room setpoint is also saved to `config.json` and applied immediately. It is limited by `room_control.min_setpoint` and `room_control.max_setpoint`.
+- The Flask dashboard currently has no authentication and listens on all network interfaces. Keep it on a trusted private network and do not expose port 5000 to the public internet; tuning values directly affect heating control.

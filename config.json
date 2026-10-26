@@ -6,7 +6,7 @@
     "heating_circuit": "28-012112fe220c"
   },
   "room_control": {
-    "setpoint": 20.0,
+    "setpoint": 21.0,
     "integral_gain_per_hour": 1.0,
     "max_correction": 8.0,
     "min_setpoint": 5.0,
@@ -37,10 +37,22 @@
     "max_points": 288
   },
   "alerts": {
-    "house": { "min": 15.0, "max": 25.0 },
-    "outside": { "min": -20.0, "max": 40.0 },
-    "accumulator_tank": { "min": 10.0, "max": 90.0 },
-    "heating_circuit": { "min": 15.0, "max": 70.0 }
+    "house": {
+      "min": 18.0,
+      "max": 23.0
+    },
+    "outside": {
+      "min": -20.0,
+      "max": 40.0
+    },
+    "accumulator_tank": {
+      "min": 40.0,
+      "max": 55.0
+    },
+    "heating_circuit": {
+      "min": 20.0,
+      "max": 45.0
+    }
   },
   "email_alerts": {
     "enabled": false,
