@@ -31,6 +31,10 @@
     "voltage_span": 10.0,
     "inverted": false
   },
+  "valve_control": {
+    "mode": "automatic",
+    "manual_open_percent": 23.0
+  },
   "loop_interval_seconds": 5,
   "web_port": 5000,
   "history": {

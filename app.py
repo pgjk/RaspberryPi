@@ -30,6 +30,7 @@ room_config = config["room_control"]
 curve_config = config["heating_curve"]
 pid_config = config["heating_circuit_pid"]
 output_config = config["actuator_output"]
+valve_control_config = config["valve_control"]
 
 monitor = TemperatureMonitor(config["sensors"])
 controller = PIDController(
@@ -62,6 +63,9 @@ state = {
     "base_heating_circuit_target": None,
     "room_correction": 0.0,
     "effective_setpoint": None,
+    "valve_control_mode": valve_control_config["mode"],
+    "manual_open_percent": valve_control_config["manual_open_percent"],
+    "valve_open_percent": 0.0,
     "last_updated": None,
     "alert": None,
 }
@@ -156,6 +160,16 @@ def save_config(updated_config: dict) -> None:
         raise
 
 
+def apply_valve_voltage(voltage: float) -> None:
+    voltage = max(0.0, min(output_config["voltage_span"], voltage))
+    duty_cycle = voltage / output_config["voltage_span"]
+    if output_config["inverted"]:
+        duty_cycle = 1.0 - duty_cycle
+    pwm.value = max(0.0, min(1.0, duty_cycle))
+    state["valve_voltage"] = voltage
+    state["valve_open_percent"] = 100.0 * voltage / output_config["voltage_span"]
+
+
 def control_loop() -> None:
     try:
         last_update = time.monotonic()
@@ -172,8 +186,16 @@ def control_loop() -> None:
             house_temp = temperatures.get("house")
             outside_temp = temperatures.get("outside")
             circuit_temp = temperatures.get("heating_circuit")
-            if house_temp is not None and outside_temp is not None and circuit_temp is not None:
-                with settings_lock:
+            missing_automatic_temperatures = False
+            with settings_lock:
+                if state["valve_control_mode"] == "manual":
+                    manual_voltage = (
+                        state["manual_open_percent"]
+                        * output_config["voltage_span"]
+                        / 100.0
+                    )
+                    apply_valve_voltage(manual_voltage)
+                elif house_temp is not None and outside_temp is not None and circuit_temp is not None:
                     base_target = (
                         curve_config["slope"] * outside_temp + curve_config["intercept"]
                     )
@@ -195,18 +217,16 @@ def control_loop() -> None:
                         pid_config["output_min"],
                         min(pid_config["output_max"], output_voltage),
                     )
-                    duty_cycle = output_voltage / output_config["voltage_span"]
-                    if output_config["inverted"]:
-                        duty_cycle = 1.0 - duty_cycle
-                    pwm.value = max(0.0, min(1.0, duty_cycle))
-                    state["valve_voltage"] = output_voltage
+                    apply_valve_voltage(output_voltage)
                     state["base_heating_circuit_target"] = base_target
                     state["room_correction"] = room_integral.correction
                     state["effective_setpoint"] = circuit_target
-            else:
+                else:
+                    missing_automatic_temperatures = True
+            if missing_automatic_temperatures:
                 logging.warning(
                     "A required house, outside, or heating-circuit temperature is "
-                    "unavailable; holding the current actuator command."
+                    "unavailable in automatic mode; holding the current actuator command."
                 )
 
             add_history(temperatures, state["valve_voltage"])
@@ -300,6 +320,26 @@ def index():
         </div>
 
         <div class="card">
+            <h2>Shunt valve</h2>
+            <div class="grid">
+                <div>
+                    <label for="valveModeInput">Control mode</label>
+                    <select id="valveModeInput" onchange="updateManualControls()">
+                        <option value="automatic">Automatic</option>
+                        <option value="manual">Manual</option>
+                    </select>
+                </div>
+                <div id="manualValveControl" style="display:none;">
+                    <label for="manualOpenInput">Manual opening: <span id="manualOpenValue">0%</span></label>
+                    <input id="manualOpenInput" type="range" min="0" max="100" step="1" value="0" oninput="updateManualOpenLabel()" />
+                </div>
+            </div>
+            <p class="small">Valve command: <span id="valveOpenPercent">0%</span></p>
+            <p id="valveControlStatus" class="small" role="status"></p>
+            <button class="button" onclick="saveValveControl()">Apply valve mode</button>
+        </div>
+
+        <div class="card">
             <h2>Control tuning</h2>
             <p class="small">Changes are saved to config.json and applied immediately.</p>
             <div class="grid">
@@ -375,6 +415,7 @@ def index():
             document.getElementById('setpoint').textContent = `${data.setpoint.toFixed(1)} °C`;
             document.getElementById('effectiveSetpoint').textContent = formatTemp(data.effective_setpoint);
             document.getElementById('valveVoltage').textContent = `${data.valve_voltage.toFixed(2)} V`;
+            document.getElementById('valveOpenPercent').textContent = `${data.valve_open_percent.toFixed(0)}%`;
             const setpointInput = document.getElementById('setpointInput');
             if (document.activeElement !== setpointInput) {
                 setpointInput.value = data.setpoint.toFixed(1);
@@ -475,6 +516,58 @@ def index():
             }
         }
 
+        function updateManualControls() {
+            const manual = document.getElementById('valveModeInput').value === 'manual';
+            document.getElementById('manualValveControl').style.display = manual ? 'block' : 'none';
+        }
+
+        function updateManualOpenLabel() {
+            document.getElementById('manualOpenValue').textContent =
+                `${document.getElementById('manualOpenInput').value}%`;
+        }
+
+        async function loadValveControl() {
+            const response = await fetch('/api/valve-control');
+            if (!response.ok) {
+                throw new Error('Could not load valve control settings.');
+            }
+            const settings = await response.json();
+            document.getElementById('valveModeInput').value = settings.mode;
+            document.getElementById('manualOpenInput').value = settings.manual_open_percent;
+            updateManualControls();
+            updateManualOpenLabel();
+        }
+
+        async function saveValveControl() {
+            const status = document.getElementById('valveControlStatus');
+            const values = {
+                mode: document.getElementById('valveModeInput').value,
+                manual_open_percent: document.getElementById('manualOpenInput').value
+            };
+
+            try {
+                const response = await fetch('/api/valve-control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(values)
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Could not apply valve control settings.');
+                }
+                document.getElementById('valveModeInput').value = result.mode;
+                document.getElementById('manualOpenInput').value = result.manual_open_percent;
+                updateManualControls();
+                updateManualOpenLabel();
+                status.textContent = result.mode === 'manual'
+                    ? `Manual mode active at ${result.manual_open_percent}% command.`
+                    : 'Automatic mode active.';
+                await updateDashboard();
+            } catch (error) {
+                status.textContent = error.message;
+            }
+        }
+
         async function sendTestEmail() {
             await fetch('/api/email-test', { method: 'POST' });
             alert('Email test request sent. Check logs and inbox.');
@@ -490,6 +583,9 @@ def index():
         loadControlSettings().catch(error => {
             document.getElementById('controlSettingsStatus').textContent = error.message;
         });
+        loadValveControl().catch(error => {
+            document.getElementById('valveControlStatus').textContent = error.message;
+        });
     </script>
 </body>
 </html>"""
@@ -498,6 +594,76 @@ def index():
 @app.route("/api/status")
 def api_status():
     return jsonify(state)
+
+
+@app.route("/api/valve-control", methods=["GET", "POST"])
+def api_valve_control():
+    if request.method == "GET":
+        with settings_lock:
+            return jsonify(
+                {
+                    "mode": state["valve_control_mode"],
+                    "manual_open_percent": state["manual_open_percent"],
+                }
+            )
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "A JSON object is required."}), 400
+
+    mode = payload.get("mode")
+    if mode not in ("automatic", "manual"):
+        return jsonify(
+            {"success": False, "error": "Mode must be 'automatic' or 'manual'."}
+        ), 400
+    if isinstance(payload.get("manual_open_percent"), bool):
+        return jsonify(
+            {"success": False, "error": "Manual opening must be a number from 0 to 100."}
+        ), 400
+
+    try:
+        manual_open_percent = float(payload["manual_open_percent"])
+        if not math.isfinite(manual_open_percent) or not 0.0 <= manual_open_percent <= 100.0:
+            raise ValueError("Manual opening must be between 0 and 100 percent.")
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    with settings_lock:
+        updated_config = deepcopy(config)
+        updated_config["valve_control"].update(
+            {
+                "mode": mode,
+                "manual_open_percent": manual_open_percent,
+            }
+        )
+        try:
+            save_config(updated_config)
+        except OSError:
+            logging.exception("Could not save valve control settings to config.json")
+            return jsonify(
+                {"success": False, "error": "Could not save valve control settings."}
+            ), 500
+
+        config["valve_control"].update(updated_config["valve_control"])
+        valve_control_config.update(updated_config["valve_control"])
+        state["valve_control_mode"] = mode
+        state["manual_open_percent"] = manual_open_percent
+        if mode == "manual":
+            manual_voltage = manual_open_percent * output_config["voltage_span"] / 100.0
+            apply_valve_voltage(manual_voltage)
+        state["effective_setpoint"] = None
+        state["base_heating_circuit_target"] = None
+        state["room_correction"] = 0.0
+        controller.reset()
+        room_integral.reset()
+
+    return jsonify(
+        {
+            "success": True,
+            "mode": mode,
+            "manual_open_percent": manual_open_percent,
+        }
+    )
 
 
 @app.route("/api/control-settings", methods=["GET", "POST"])
