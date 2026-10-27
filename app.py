@@ -269,6 +269,12 @@ def index():
         input[type=number] { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; }
         .alert { color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; border-radius: 10px; padding: 12px; margin-top: 12px; }
         .connection-error { color: #991b1b; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 10px; padding: 12px; margin-bottom: 20px; }
+        .chart-container { position: relative; height: 320px; }
+        @media (max-width: 600px) {
+            .page { padding: 12px; }
+            .card { padding: 14px; }
+            .chart-container { height: 260px; }
+        }
     </style>
 </head>
 <body>
@@ -385,7 +391,9 @@ def index():
         </div>
 
         <div class="card">
-            <canvas id="historyChart" height="120"></canvas>
+            <div class="chart-container">
+                <canvas id="historyChart"></canvas>
+            </div>
         </div>
 
         <div class="card">
@@ -413,6 +421,7 @@ def index():
             data: chartData,
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 scales: {
                     A: { type: 'linear', position: 'left', title: { display: true, text: 'Temperature (°C)' } },
                     B: { type: 'linear', position: 'right', title: { display: true, text: 'Valve voltage (V)' }, min: 0, max: 10, grid: { drawOnChartArea: false } }
