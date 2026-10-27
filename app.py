@@ -408,10 +408,10 @@ def index():
         const chartData = {
             labels,
             datasets: [
-                { label: 'House', borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.1)', data: [], tension: 0.3 },
-                { label: 'Outside', borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', data: [], tension: 0.3 },
-                { label: 'Accumulator tank', borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', data: [], tension: 0.3 },
-                { label: 'Heating circuit', borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', data: [], tension: 0.3 },
+                { label: 'House', borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.1)', data: [], tension: 0.3, yAxisID: 'A' },
+                { label: 'Outside', borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', data: [], tension: 0.3, yAxisID: 'A' },
+                { label: 'Accumulator tank', borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', data: [], tension: 0.3, yAxisID: 'A' },
+                { label: 'Heating circuit', borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', data: [], tension: 0.3, yAxisID: 'A' },
                 { label: 'Valve voltage', borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.1)', data: [], tension: 0.3, yAxisID: 'B' }
             ]
         };
