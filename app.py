@@ -256,10 +256,14 @@ def index():
         .button:hover { background: #1d4ed8; }
         input[type=number] { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; }
         .alert { color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; border-radius: 10px; padding: 12px; margin-top: 12px; }
+        .connection-error { color: #991b1b; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 10px; padding: 12px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
     <div class="page">
+        <div id="connectionError" class="connection-error" role="alert" style="display:none;">
+            Lost connection to the heating controller. Displayed values may be out of date; retrying…
+        </div>
         <div class="header">
             <div>
                 <h1>Heating Control Dashboard</h1>
@@ -407,6 +411,9 @@ def index():
 
         async function updateDashboard() {
             const response = await fetch('/api/status');
+            if (!response.ok) {
+                throw new Error(`Status request failed (${response.status}).`);
+            }
             const data = await response.json();
             document.getElementById('houseTemp').textContent = formatTemp(data.current_temps.house);
             document.getElementById('outsideTemp').textContent = formatTemp(data.current_temps.outside);
@@ -431,6 +438,9 @@ def index():
 
         async function updateHistory() {
             const response = await fetch('/api/history');
+            if (!response.ok) {
+                throw new Error(`History request failed (${response.status}).`);
+            }
             const data = await response.json();
             labels.length = 0;
             chartData.datasets.forEach(dataset => dataset.data.length = 0);
@@ -574,8 +584,15 @@ def index():
         }
 
         async function refresh() {
-            await updateDashboard();
-            await updateHistory();
+            const connectionError = document.getElementById('connectionError');
+            try {
+                await updateDashboard();
+                await updateHistory();
+                connectionError.style.display = 'none';
+            } catch (error) {
+                console.error('Dashboard refresh failed:', error);
+                connectionError.style.display = 'block';
+            }
         }
 
         setInterval(refresh, 5000);
