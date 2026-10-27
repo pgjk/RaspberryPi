@@ -7,6 +7,7 @@ This project reads multiple 1-Wire temperature sensors and controls an ESBE ARA6
 - `app.py` - Flask web application with dashboard, history graphs, setpoint control, and email alert support.
 - `temperature.py` - Reads DS18B20 sensors from `/sys/bus/w1/devices`.
 - `pid_controller.py` - Heating-circuit PID and bounded room-temperature integral correction.
+- `history_store.py` - SQLite-backed persistent temperature and valve history.
 - `config.json` - Example configuration for sensors, PID tuning, email alerts, and limits.
 - `requirements.txt` - Python dependencies.
 
@@ -50,6 +51,7 @@ http://<raspberry-pi-ip>:5000
 - The configured room setpoint defaults to 20°C. Tune the room integral gain and heating-circuit PID gains carefully, initially observing operation continuously. The 44°C heating-circuit target maximum is a configured control limit, not a substitute for any lower limit required by the heating emitters or installation.
 - Email alerts require SMTP credentials configured in `config.json`.
 - If a required room, outdoor, or heating-circuit sensor reading is unavailable, the control loop holds the current PWM command and logs a warning.
+- Temperature and valve samples are stored in `heating_history.sqlite3` beside the application. The database retains 90 days of data; the dashboard loads the latest `history.max_points` samples (288 by default) after restart. SQLite is included with Python, so no additional database service or package is needed.
 - Use the dashboard's **Control tuning** section to update heating-circuit `kp`, `ki`, `kd`, and outdoor-curve `slope` and `intercept`. Values are applied immediately, the PID state is reset, and the settings are saved to `config.json` for the next restart. PID gains must be non-negative; all values must be finite.
 - The dashboard's room setpoint is also saved to `config.json` and applied immediately. It is limited by `room_control.min_setpoint` and `room_control.max_setpoint`.
 - The **Shunt valve** section switches between automatic control and manual mode. Manual opening is a 0–100% command (mapped to 0–10 V) and is saved with the selected mode in `config.json`. Verify the actuator/interface direction before relying on the displayed command as a physical opening percentage.

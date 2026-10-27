@@ -38,7 +38,9 @@
   "loop_interval_seconds": 5,
   "web_port": 5000,
   "history": {
-    "max_points": 288
+    "max_points": 288,
+    "database_file": "heating_history.sqlite3",
+    "retention_days": 90
   },
   "alerts": {
     "house": {

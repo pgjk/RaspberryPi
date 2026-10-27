@@ -8,12 +8,13 @@ import threading
 import time
 from copy import deepcopy
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
 from flask import Flask, jsonify, request
 
+from history_store import HistoryStore
 from pid_controller import PIDController, RoomIntegralCorrection
 from temperature import TemperatureMonitor
 from gpiozero import PWMOutputDevice
@@ -51,10 +52,20 @@ pwm = PWMOutputDevice(
     initial_value=0,
 )
 
+history_store = HistoryStore(
+    database_path=BASE_DIR / config["history"]["database_file"],
+    sensor_keys=config["sensors"].keys(),
+    max_points=config["history"]["max_points"],
+    retention_days=config["history"]["retention_days"],
+)
+restored_history = history_store.load_latest()
 history = {
-    key: deque(maxlen=config["history"]["max_points"]) for key in config["sensors"].keys()
+    key: deque(
+        restored_history[key],
+        maxlen=config["history"]["max_points"],
+    )
+    for key in (*config["sensors"].keys(), "valve_voltage")
 }
-history["valve_voltage"] = deque(maxlen=config["history"]["max_points"])
 
 state = {
     "current_temps": {key: None for key in config["sensors"].keys()},
@@ -130,7 +141,8 @@ def check_alerts(temperatures: dict) -> None:
 
 
 def add_history(temperatures: dict, valve_voltage: float) -> None:
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    history_store.append(timestamp, temperatures, valve_voltage)
     with history_lock:
         for key, value in temperatures.items():
             history[key].append({"time": timestamp, "value": value})
@@ -176,7 +188,7 @@ def control_loop() -> None:
         while True:
             temperatures = monitor.read_all()
             state["current_temps"] = temperatures
-            state["last_updated"] = datetime.utcnow().isoformat()
+            state["last_updated"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
             now = time.monotonic()
             dt = max(now - last_update, 0.0)
             last_update = now
